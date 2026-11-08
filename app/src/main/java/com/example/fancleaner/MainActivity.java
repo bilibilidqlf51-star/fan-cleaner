@@ -3,6 +3,7 @@ package com.example.fancleaner;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.accessibility.AccessibilityManager;
@@ -21,6 +22,12 @@ public class MainActivity extends Activity {
 
         findViewById(R.id.btn_open).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+
+        findViewById(R.id.btn_overlay).setOnClickListener(v -> {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        });
     }
 
     @Override
@@ -29,23 +36,37 @@ public class MainActivity extends Activity {
         updateStatus();
     }
 
-    /** 检查本包的无障碍服务是否已开启 */
+    /** 检查无障碍服务与悬浮窗权限状态 */
     private void updateStatus() {
-        boolean enabled = false;
+        boolean accessibility = isAccessibilityEnabled();
+        boolean overlay = Settings.canDrawOverlays(this);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("无障碍服务：").append(accessibility ? "已开启 ✓" : "未开启 ✗").append('\n');
+        sb.append("悬浮窗权限：").append(overlay ? "已授予 ✓" : "未授予 ✗").append("\n\n");
+
+        if (accessibility && overlay) {
+            sb.append("全部就绪：打开抖音 → 我 → 点「粉丝」数字进入列表页，");
+            sb.append("然后点悬浮窗上的「开始」即可。");
+        } else {
+            sb.append("请点下方对应按钮完成授权：\n");
+            if (!accessibility) sb.append("• 「去系统设置开启无障碍服务」\n");
+            if (!overlay) sb.append("• 「授予悬浮窗权限」\n");
+        }
+        tvStatus.setText(sb.toString());
+    }
+
+    private boolean isAccessibilityEnabled() {
         AccessibilityManager am = (AccessibilityManager) getSystemService(ACCESSIBILITY_SERVICE);
-        if (am != null) {
-            for (AccessibilityServiceInfo info :
-                    am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)) {
-                if (info.getResolveInfo() != null
-                        && info.getResolveInfo().serviceInfo != null
-                        && getPackageName().equals(info.getResolveInfo().serviceInfo.packageName)) {
-                    enabled = true;
-                    break;
-                }
+        if (am == null) return false;
+        for (AccessibilityServiceInfo info :
+                am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)) {
+            if (info.getResolveInfo() != null
+                    && info.getResolveInfo().serviceInfo != null
+                    && getPackageName().equals(info.getResolveInfo().serviceInfo.packageName)) {
+                return true;
             }
         }
-        tvStatus.setText(enabled
-                ? "无障碍服务：已开启 ✓\n\n打开抖音 → 我 → 点「粉丝」数字进入列表页，服务会自动开始清理。"
-                : "无障碍服务：未开启\n\n请点下方按钮，在系统设置里找到「清粉助手」并开启。");
+        return false;
     }
 }

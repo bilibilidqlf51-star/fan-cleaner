@@ -53,9 +53,11 @@ public class FanCleanerService extends AccessibilityService {
     private final Random random = new Random();
 
     private AvatarClassifier classifier;
+    private FloatingWindow floating;
 
     private int removed = 0;
     private boolean scanning = false;
+    private volatile boolean running = false;
     private Step step = Step.IDLE;
 
     private enum Step {
@@ -81,13 +83,56 @@ public class FanCleanerService extends AccessibilityService {
         super.onServiceConnected();
         Log.i(TAG, "服务已连接，头像过滤=" + ENABLE_AVATAR_FILTER);
         classifier = new AvatarClassifier(this);
-        toast("清粉服务已开启：请打开抖音粉丝列表页");
+
+        floating = new FloatingWindow(this, new FloatingWindow.Listener() {
+            @Override
+            public void onStartClicked() {
+                startCleaning();
+            }
+
+            @Override
+            public void onStopClicked() {
+                stopCleaning();
+            }
+        });
+        if (floating.canShow()) {
+            floating.show();
+            floating.setStatus("清粉：待命（打开抖音粉丝页后点开始）");
+        } else {
+            toast("没有悬浮窗权限：请回 App 里点「授予悬浮窗权限」");
+        }
+
+        toast("清粉助手已启动");
         handler.postDelayed(this::tick, 2000);
+    }
+
+    /** 悬浮窗「开始」：重置计数并启动 */
+    private void startCleaning() {
+        running = true;
+        removed = 0;
+        step = Step.SCAN;
+        if (floating != null) floating.setStatus("运行中 0/" + TARGET);
+        toast("开始清理，请保持抖音粉丝列表页在前台");
+        handler.removeCallbacksAndMessages(null);
+        handler.postDelayed(this::tick, 300);
+    }
+
+    /** 悬浮窗「停止」 */
+    private void stopCleaning() {
+        running = false;
+        step = Step.IDLE;
+        handler.removeCallbacksAndMessages(null);
+        if (floating != null) {
+            floating.setStatus("已停止（已移除 " + removed + " 个）");
+        }
+        Log.i(TAG, "已停止，累计移除 " + removed);
+        handler.postDelayed(this::tick, 1500);
     }
 
     @Override
     public void onDestroy() {
         if (classifier != null) classifier.close();
+        if (floating != null) floating.hide();
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
@@ -109,6 +154,10 @@ public class FanCleanerService extends AccessibilityService {
     // ======================== 主循环 ========================
 
     private void tick() {
+        if (!running) {
+            schedule(1500);
+            return;
+        }
         if (removed >= TARGET) {
             finish("已完成：本次移除 " + removed + " 个粉丝");
             return;
@@ -308,6 +357,9 @@ public class FanCleanerService extends AccessibilityService {
     private void onRemoved() {
         removed++;
         Log.i(TAG, "已移除 " + removed + "/" + TARGET);
+        if (floating != null) {
+            floating.setStatus("运行中 " + removed + "/" + TARGET);
+        }
         if (removed >= TARGET) {
             finish("已完成：本次移除 " + removed + " 个粉丝");
             return;
@@ -513,7 +565,11 @@ public class FanCleanerService extends AccessibilityService {
     private void finish(String msg) {
         Log.i(TAG, msg);
         toast(msg);
+        running = false;
         step = Step.IDLE;
+        if (floating != null) {
+            floating.setStatus(msg.replace("已完成：", "已完成 "));
+        }
         handler.removeCallbacksAndMessages(null);
     }
 
