@@ -13,13 +13,18 @@ import android.view.WindowManager;
 import android.widget.TextView;
 
 /**
- * 悬浮窗：显示清理状态（待命 / 运行中 x/20 / 已停止 / 已完成），并提供「开始 / 停止」按钮。
- * 拖动：按住状态文字区域拖动；按钮点击不受影响。
+ * 悬浮窗：状态面板 + 控制按钮。
+ *
+ * 显示：服务状态、页面识别、进度、当前动作
+ * 操作：开始 / 暂停 / 停止 / 折叠
+ * 拖动：按住标题「清粉助手」拖动
  */
 public class FloatingWindow {
 
     public interface Listener {
         void onStartClicked();
+
+        void onPauseClicked();
 
         void onStopClicked();
     }
@@ -29,15 +34,21 @@ public class FloatingWindow {
 
     private WindowManager wm;
     private View view;
-    private TextView tvStatus;
+    private TextView tvTitle;
+    private TextView tvService;
+    private TextView tvPage;
+    private TextView tvProgress;
+    private TextView tvAction;
+    private View body;
+    private View btnCollapse;
     private WindowManager.LayoutParams params;
+    private boolean collapsed = false;
 
     public FloatingWindow(Context context, Listener listener) {
         this.context = context;
         this.listener = listener;
     }
 
-    /** 是否已获得悬浮窗权限 */
     public boolean canShow() {
         return Settings.canDrawOverlays(context);
     }
@@ -49,8 +60,8 @@ public class FloatingWindow {
         view = LayoutInflater.from(context).inflate(R.layout.floating_window, null);
 
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xEE1F1F1F);
-        bg.setCornerRadius(24f);
+        bg.setColor(0xEE1A1A1A);
+        bg.setCornerRadius(28f);
         view.setBackground(bg);
 
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
@@ -61,19 +72,26 @@ public class FloatingWindow {
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
-        params.x = 40;
-        params.y = 260;
+        params.x = 30;
+        params.y = 240;
 
-        tvStatus = view.findViewById(R.id.tv_status);
+        tvTitle = view.findViewById(R.id.tv_title);
+        tvService = view.findViewById(R.id.tv_service);
+        tvPage = view.findViewById(R.id.tv_page);
+        tvProgress = view.findViewById(R.id.tv_progress);
+        tvAction = view.findViewById(R.id.tv_action);
+        body = view.findViewById(R.id.body);
+        btnCollapse = view.findViewById(R.id.btn_collapse);
+
         view.findViewById(R.id.btn_start).setOnClickListener(v -> listener.onStartClicked());
+        view.findViewById(R.id.btn_pause).setOnClickListener(v -> listener.onPauseClicked());
         view.findViewById(R.id.btn_stop).setOnClickListener(v -> listener.onStopClicked());
 
-        // 只在状态文字上拖动，按钮点击不受影响
-        final View dragArea = tvStatus;
+        // 标题栏拖动
+        View dragArea = tvTitle;
         dragArea.setOnTouchListener(new View.OnTouchListener() {
             private int startX;
             private int startY;
@@ -102,6 +120,14 @@ public class FloatingWindow {
             }
         });
 
+        // 折叠/展开
+        btnCollapse.setOnClickListener(v -> {
+            collapsed = !collapsed;
+            body.setVisibility(collapsed ? View.GONE : View.VISIBLE);
+            btnCollapse.setTag(collapsed ? "1" : "0");
+            ((TextView) btnCollapse).setText(collapsed ? "▸" : "▾");
+        });
+
         try {
             wm.addView(view, params);
         } catch (Exception e) {
@@ -109,9 +135,20 @@ public class FloatingWindow {
         }
     }
 
-    public void setStatus(String text) {
-        if (tvStatus == null) return;
-        tvStatus.post(() -> tvStatus.setText(text));
+    public void setService(String text) {
+        if (tvService != null) tvService.post(() -> tvService.setText("服务：" + text));
+    }
+
+    public void setPage(String text) {
+        if (tvPage != null) tvPage.post(() -> tvPage.setText("页面：" + text));
+    }
+
+    public void setProgress(int current, int total) {
+        if (tvProgress != null) tvProgress.post(() -> tvProgress.setText("进度：" + current + " / " + total));
+    }
+
+    public void setAction(String text) {
+        if (tvAction != null) tvAction.post(() -> tvAction.setText("动作：" + text));
     }
 
     public void hide() {

@@ -15,9 +15,14 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 
+import java.io.File;
+import java.io.FileWriter;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -58,6 +63,7 @@ public class FanCleanerService extends AccessibilityService {
     private int removed = 0;
     private boolean scanning = false;
     private volatile boolean running = false;
+    private volatile boolean paused = false;
     private Step step = Step.IDLE;
 
     private enum Step {
@@ -82,6 +88,7 @@ public class FanCleanerService extends AccessibilityService {
     public void onServiceConnected() {
         super.onServiceConnected();
         Log.i(TAG, "服务已连接，头像过滤=" + ENABLE_AVATAR_FILTER);
+        fileLog("服务已连接");
         classifier = new AvatarClassifier(this);
 
         floating = new FloatingWindow(this, new FloatingWindow.Listener() {
@@ -91,15 +98,24 @@ public class FanCleanerService extends AccessibilityService {
             }
 
             @Override
+            public void onPauseClicked() {
+                togglePause();
+            }
+
+            @Override
             public void onStopClicked() {
                 stopCleaning();
             }
         });
         if (floating.canShow()) {
             floating.show();
-            floating.setStatus("清粉：待命（打开抖音粉丝页后点开始）");
+            floating.setService("已连接 ✓");
+            floating.setPage("-");
+            floating.setProgress(0, TARGET);
+            floating.setAction("待命（打开抖音粉丝页后点开始）");
         } else {
             toast("没有悬浮窗权限：请回 App 里点「授予悬浮窗权限」");
+            fileLog("悬浮窗权限缺失");
         }
 
         toast("清粉助手已启动");
@@ -109,21 +125,41 @@ public class FanCleanerService extends AccessibilityService {
     /** 悬浮窗「开始」：重置计数并启动 */
     private void startCleaning() {
         running = true;
+        paused = false;
         removed = 0;
         step = Step.SCAN;
-        if (floating != null) floating.setStatus("运行中 0/" + TARGET);
+        fileLog("用户点击开始");
+        if (floating != null) {
+            floating.setProgress(0, TARGET);
+            floating.setAction("启动中…");
+        }
         toast("开始清理，请保持抖音粉丝列表页在前台");
         handler.removeCallbacksAndMessages(null);
         handler.postDelayed(this::tick, 300);
     }
 
+    /** 悬浮窗「暂停/继续」 */
+    private void togglePause() {
+        if (!running) {
+            toast("还没开始，先点开始");
+            return;
+        }
+        paused = !paused;
+        fileLog("暂停=" + paused);
+        if (floating != null) {
+            floating.setAction(paused ? "已暂停（再点一次继续）" : "继续运行");
+        }
+    }
+
     /** 悬浮窗「停止」 */
     private void stopCleaning() {
         running = false;
+        paused = false;
         step = Step.IDLE;
         handler.removeCallbacksAndMessages(null);
+        fileLog("用户点击停止，累计移除 " + removed);
         if (floating != null) {
-            floating.setStatus("已停止（已移除 " + removed + " 个）");
+            floating.setAction("已停止（本次移除 " + removed + " 个）");
         }
         Log.i(TAG, "已停止，累计移除 " + removed);
         handler.postDelayed(this::tick, 1500);
@@ -158,17 +194,30 @@ public class FanCleanerService extends AccessibilityService {
             schedule(1500);
             return;
         }
+        if (paused) {
+            if (floating != null) floating.setAction("已暂停（再点「暂停」继续）");
+            schedule(1000);
+            return;
+        }
         if (removed >= TARGET) {
             finish("已完成：本次移除 " + removed + " 个粉丝");
             return;
         }
 
         AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null || !DOUYIN_PKG.equals(String.valueOf(root.getPackageName()))) {
+        if (root == null) {
+            if (floating != null) floating.setPage("读不到界面（服务未就绪）");
+            schedule(PAGE_CHECK_INTERVAL);
+            return;
+        }
+        String pkg = String.valueOf(root.getPackageName());
+        if (!DOUYIN_PKG.equals(pkg)) {
+            if (floating != null) floating.setPage("非抖音（" + pkg + "）");
             schedule(PAGE_CHECK_INTERVAL);
             return;
         }
         if (!isFanListPage(root)) {
+            if (floating != null) floating.setPage("抖音，但不在粉丝列表页");
             if (step != Step.IDLE) {
                 Log.d(TAG, "离开粉丝页，暂停");
                 step = Step.IDLE;
@@ -176,6 +225,7 @@ public class FanCleanerService extends AccessibilityService {
             schedule(PAGE_CHECK_INTERVAL);
             return;
         }
+        if (floating != null) floating.setPage("粉丝列表页 ✓");
 
         switch (step) {
             case IDLE:
@@ -195,20 +245,25 @@ public class FanCleanerService extends AccessibilityService {
     private void handleScan(AccessibilityNodeInfo root) {
         if (scanning) return;
         if (classifier == null) {
+            if (floating != null) floating.setAction("分类器未就绪");
             schedule(PAGE_CHECK_INTERVAL);
             return;
         }
 
+        if (floating != null) floating.setAction("扫描当前屏…");
         List<RowTarget> rows = scanRows(root);
         if (rows.isEmpty()) {
             if (scrollListForward(root)) {
                 Log.d(TAG, "当前屏无行，滚动找下一批");
+                if (floating != null) floating.setAction("本屏没找到粉丝行，滚动加载…");
                 schedule(DELAY_MAX);
             } else {
+                if (floating != null) floating.setAction("本屏无行且无法滚动");
                 schedule(PAGE_CHECK_INTERVAL);
             }
             return;
         }
+        fileLog("扫描到 " + rows.size() + " 行");
 
         if (!ENABLE_AVATAR_FILTER || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             // 不开过滤 / 系统不支持截图 → 直接按顺序清理
@@ -307,6 +362,8 @@ public class FanCleanerService extends AccessibilityService {
     private void clickMore(RowTarget row) {
         boolean clicked = performClick(row.more);
         Log.d(TAG, "点击「更多」: " + clicked);
+        fileLog("点击「更多」=" + clicked);
+        if (floating != null) floating.setAction(clicked ? "点开菜单…" : "点击「更多」失败，重试");
         if (clicked) {
             step = Step.WAIT_MENU;
             schedule(900);
@@ -317,9 +374,12 @@ public class FanCleanerService extends AccessibilityService {
 
     /** 菜单弹出后点「移除粉丝」 */
     private void handleWaitMenu(AccessibilityNodeInfo root) {
+        if (floating != null) floating.setAction("查找「移除粉丝」…");
         List<AccessibilityNodeInfo> targets = root.findAccessibilityNodeInfosByText("移除粉丝");
         if (targets == null || targets.isEmpty()) {
             Log.d(TAG, "未找到「移除粉丝」，菜单可能没弹出来");
+            fileLog("菜单里没找到「移除粉丝」");
+            if (floating != null) floating.setAction("菜单里没有「移除粉丝」，重试");
             step = Step.SCAN;
             schedule(randomDelay());
             return;
@@ -327,12 +387,15 @@ public class FanCleanerService extends AccessibilityService {
         AccessibilityNodeInfo clickable = clickableSelfOrAncestor(targets.get(0));
         if (clickable == null) {
             Log.d(TAG, "「移除粉丝」不可点击");
+            fileLog("「移除粉丝」不可点击");
             step = Step.SCAN;
             schedule(randomDelay());
             return;
         }
         boolean clicked = performClick(clickable);
         Log.d(TAG, "点击「移除粉丝」: " + clicked);
+        fileLog("点击「移除粉丝」=" + clicked);
+        if (floating != null) floating.setAction(clicked ? "已点「移除粉丝」，等确认…" : "点「移除粉丝」失败");
         if (clicked) {
             step = Step.WAIT_CONFIRM;
             handler.postDelayed(this::tick, CONFIRM_WAIT);
@@ -357,8 +420,10 @@ public class FanCleanerService extends AccessibilityService {
     private void onRemoved() {
         removed++;
         Log.i(TAG, "已移除 " + removed + "/" + TARGET);
+        fileLog("已移除 " + removed + "/" + TARGET);
         if (floating != null) {
-            floating.setStatus("运行中 " + removed + "/" + TARGET);
+            floating.setProgress(removed, TARGET);
+            floating.setAction("已移除 " + removed + " 个，继续…");
         }
         if (removed >= TARGET) {
             finish("已完成：本次移除 " + removed + " 个粉丝");
@@ -565,12 +630,28 @@ public class FanCleanerService extends AccessibilityService {
     private void finish(String msg) {
         Log.i(TAG, msg);
         toast(msg);
+        fileLog(msg);
         running = false;
+        paused = false;
         step = Step.IDLE;
         if (floating != null) {
-            floating.setStatus(msg.replace("已完成：", "已完成 "));
+            floating.setProgress(removed, TARGET);
+            floating.setAction(msg.replace("已完成：", "已完成："));
         }
         handler.removeCallbacksAndMessages(null);
+    }
+
+    /** 写文件日志：绕过部分 ROM 的 logcat 限制，路径见下方 */
+    private void fileLog(String msg) {
+        try {
+            File dir = getExternalFilesDir(null);
+            if (dir == null) return;
+            File f = new File(dir, "run.log");
+            FileWriter fw = new FileWriter(f, true);
+            fw.write(new SimpleDateFormat("HH:mm:ss", Locale.CHINA).format(new Date()) + "  " + msg + "\n");
+            fw.close();
+        } catch (Exception ignored) {
+        }
     }
 
     private void toast(String msg) {
