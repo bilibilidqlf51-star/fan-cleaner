@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center_vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="清粉助手"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="无障碍服务：检查中…"
+        android:textSize="16sp"
+        android:lineSpacingExtra="4dp" />
+
+    <Button
+        android:id="@+id/btn_open"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:text="去系统设置开启无障碍服务" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="说明：\n• 仅在抖音「粉丝指数」列表页工作\n• 头像无人脸 / 女性≥40岁 / ≤14岁 → 移除\n• 单次上限 20 个，每步随机延迟 1.2~2.2 秒\n• 移除不可逆，删除前请确认"
+        android:textSize="13sp"
+        android:textColor="#666666"
+        android:lineSpacingExtra="3dp" />
+
+</LinearLayout>

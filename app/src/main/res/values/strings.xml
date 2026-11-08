@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">清粉助手</string>
+    <string name="accessibility_desc">用于在抖音粉丝列表中自动执行「移除粉丝」操作。仅在你手动打开抖音粉丝列表页后工作。</string>
+</resources>
